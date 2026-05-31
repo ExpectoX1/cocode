@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import Editor from '@monaco-editor/react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useParams } from 'react-router-dom'
 
 const LANGUAGES = ['python', 'java', 'cpp', 'javascript'] as const
 type Language = (typeof LANGUAGES)[number]
@@ -55,7 +56,7 @@ type Comment = { id: number; author: string; line: number; text: string; time: s
 type RightPanel = 'output' | 'comments'
 
 export default function RoomPage() {
-  const roomId = '188e1454-4e78-49ba-8f2b-50b4c757d703'
+  const { roomId } = useParams<{ roomId: string }>()
   const [language, setLanguage] = useState<Language>('python')
   const [code, setCode] = useState(DEFAULT_CODE.python)
   const [output, setOutput] = useState('')
@@ -66,6 +67,7 @@ export default function RoomPage() {
   const [newComment, setNewComment] = useState('')
   const [langOpen, setLangOpen] = useState(false)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const wsRef = useRef<WebSocket | null>(null)
 
   const [comments, setComments] = useState<Comment[]>([
     { id: 1, author: 'Alex', line: 3, text: 'Nice use of a hash map here', time: '2m ago' },
@@ -82,9 +84,36 @@ export default function RoomPage() {
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [])
 
+  useEffect(()=>{
+
+  const token = localStorage.getItem('token')
+  const ws = new WebSocket(`ws://localhost:8000/ws/${roomId}?token=${token}`)
+  
+  ws.onopen = () => console.log('connected')
+  
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data)
+    if (data.type === 'code_change') {
+      setCode(data.content)
+    }else if (data.type === 'language_change') {
+        setLanguage(data.content)
+        setCode(DEFAULT_CODE[data.content as Language])
+      }
+  }
+  ws.onclose = () => console.log('disconnected')
+  
+  wsRef.current = ws
+  
+  return () => ws.close()
+}, [roomId])
+
+
   const fmt = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 
   const handleLangChange = (lang: Language) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'language_change', content: lang }))
+    }
     setLanguage(lang)
     setCode(DEFAULT_CODE[lang])
     setLangOpen(false)
